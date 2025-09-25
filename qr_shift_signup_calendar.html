@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Extra-Shift Calendar — Next 7 Days</title>
+  <style>
+    :root{--bg:#f7f7fb;--card:#fff;--muted:#666;--ink:#222}
+    body{font-family:Inter, system-ui, Arial; background:var(--bg); margin:16px;color:var(--ink)}
+    .top{display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+    .calendar{display:grid;grid-template-columns:repeat(7, minmax(180px,1fr));gap:10px}
+    .day{background:#fff;padding:10px;border-radius:10px;min-height:220px;box-shadow:0 1px 3px rgba(0,0,0,0.08);display:flex;flex-direction:column}
+    .date{font-weight:700;margin-bottom:6px}
+    .weekday{font-size:12px;color:#777;margin-bottom:4px}
+    .shift-grid{display:grid;grid-template-rows:repeat(3,1fr);gap:6px;flex:1}
+    .shift{border-radius:8px;color:#fff;font-weight:700;text-align:center;display:flex;align-items:center;justify-content:center;min-height:44px;position:relative;cursor:pointer}
+    .shift.day{background:#4caf50}
+    .shift.afternoon{background:#ff9800}
+    .shift.night{background:#3f51b5}
+    .names{margin-top:6px;background:#f3f4f6;border-radius:8px;padding:6px;min-height:44px;max-height:80px;overflow:auto;font-size:12px}
+    .names b{display:block;margin-bottom:4px;color:#555}
+    .names ul{margin:0;padding-left:16px}
+    .names li{margin:2px 0}
+    .legend{display:flex;gap:10px;align-items:center;font-size:12px;color:#555}
+    .swatch{width:12px;height:12px;border-radius:3px;display:inline-block;margin-right:6px}
+    .qr-wrap{display:flex;gap:16px;align-items:center;margin-top:12px;flex-wrap:wrap}
+    .qr{width:132px;height:132px;border:8px solid #fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+
+    /* Modal */
+    dialog{border:none;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.2);padding:0;max-width:360px}
+    .modal{padding:16px}
+    .modal h3{margin:0 0 8px}
+    .row{display:flex;flex-direction:column;margin:8px 0}
+    .row label{font-size:12px;color:#555;margin-bottom:4px}
+    select,input{padding:10px;border-radius:8px;border:1px solid #dcdcdc;background:#fff}
+    .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+    button{padding:10px 14px;border:none;border-radius:10px;background:#111;color:#fff;cursor:pointer}
+    button.secondary{background:#e5e7eb;color:#111}
+
+    @media (max-width: 1100px){ .calendar{grid-template-columns:repeat(4, minmax(180px,1fr))} }
+    @media (max-width: 800px){ .calendar{grid-template-columns:repeat(2, minmax(160px,1fr))} }
+    @media print{.top,.qr-wrap,dialog{display:none} .day{break-inside:avoid}}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+</head>
+<body>
+  <div class="top">
+    <div class="legend">
+      <span><span class="swatch" style="background:#4caf50"></span>Day</span>
+      <span><span class="swatch" style="background:#ff9800"></span>Afternoon</span>
+      <span><span class="swatch" style="background:#3f51b5"></span>Night</span>
+    </div>
+    <div class="qr-wrap">
+      <canvas id="qrcode" class="qr" title="Scan to sign up"></canvas>
+      <div>
+        <div><b>Scan to sign up</b></div>
+        <small>Opens a form where you choose day & shift and enter your name. Works offline on this device via Local Storage.</small>
+      </div>
+    </div>
+  </div>
+
+  <div id="calendar" class="calendar"></div>
+
+  <!-- Signup Modal (in-page) -->
+  <dialog id="signupDialog">
+    <form method="dialog" class="modal" id="signupForm">
+      <h3>Sign up for a shift</h3>
+      <div class="row">
+        <label for="name">Your name</label>
+        <input id="name" name="name" placeholder="Type your name" required />
+      </div>
+      <div class="row">
+        <label for="daySelect">Day</label>
+        <select id="daySelect" name="day"></select>
+      </div>
+      <div class="row">
+        <label for="shiftSelect">Shift</label>
+        <select id="shiftSelect" name="shift"></select>
+      </div>
+      <div class="actions">
+        <button class="secondary" value="cancel" id="cancelBtn" type="button">Cancel</button>
+        <button id="saveBtn" value="default" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+<script>
+  // === Config ===
+  // Mon-Thu -> Day, Afternoon, Night. Fri-Sun -> Day, Night
+  function shiftsFor(weekdayIdx){ // 1=Mon .. 7=Sun
+    return (weekdayIdx>=1 && weekdayIdx<=4) ? ['Day','Afternoon','Night'] : ['Day','Night'];
+  }
+
+  // Next 7 days starting today
+  function next7Days(){
+    const days=[]; const today=new Date(); today.setHours(0,0,0,0);
+    for(let i=0;i<7;i++){
+      const d=new Date(today); d.setDate(today.getDate()+i);
+      days.push(d);
+    }
+    return days;
+  }
+
+  // Storage helpers (localStorage)
+  const KEY_PREFIX = 'shiftSignups';
+  function keyFor(dateISO, shift){ return `${KEY_PREFIX}:${dateISO}:${shift}`; }
+  function readNames(dateISO, shift){
+    const raw = localStorage.getItem(keyFor(dateISO, shift));
+    return raw ? JSON.parse(raw) : [];
+  }
+  function saveName(dateISO, shift, name){
+    const names = readNames(dateISO, shift);
+    if(!names.includes(name.trim())){
+      names.push(name.trim());
+      localStorage.setItem(keyFor(dateISO, shift), JSON.stringify(names));
+    }
+  }
+
+  // Formatters
+  function isoDate(d){ return d.toISOString().slice(0,10); }
+  function weekdayName(d){ return d.toLocaleDateString(undefined,{weekday:'short'}); }
+  function humanDate(d){ return d.toLocaleDateString(undefined,{month:'short', day:'numeric'}); }
+
+  // Build 7-day calendar
+  const cal = document.getElementById('calendar');
+  let DAYS = next7Days();
+
+  function render(){
+    cal.innerHTML='';
+    DAYS.forEach(d=>{
+      const dateISO = isoDate(d);
+      const weekdayIdx = ((d.getDay()||7)); // 1..7 (Mon=1)
+      const shifts = ['Day','Afternoon','Night'];
+      const available = shiftsFor(weekdayIdx);
+
+      const dayEl = document.createElement('div');
+      dayEl.className = 'day';
+      dayEl.innerHTML = `<div class="weekday">${weekdayName(d)}</div><div class="date">${humanDate(d)}</div>`;
+
+      const grid = document.createElement('div');
+      grid.className = 'shift-grid';
+
+      shifts.forEach(s=>{
+        const box = document.createElement('div');
+        box.className = `shift ${s.toLowerCase()}`;
+        box.textContent = `${s} shift`;
+        if(!available.includes(s)){
+          box.style.visibility = 'hidden';
+        } else {
+          box.addEventListener('click', ()=> openSignup({ dateISO, label: humanDate(d), shift:s }));
+        }
+
+        const namesWrap = document.createElement('div');
+        namesWrap.className = 'names';
+        const names = readNames(dateISO, s);
+        namesWrap.innerHTML = `<b>Signed up</b>${names.length?'<ul>'+names.map(n=>`<li>${escapeHtml(n)}</li>`).join('')+'</ul>':'<div style="color:#888">No one yet</div>'}`;
+
+        const cell = document.createElement('div');
+        cell.style.display='flex';
+        cell.style.flexDirection='column';
+        cell.appendChild(box);
+        cell.appendChild(namesWrap);
+        grid.appendChild(cell);
+      });
+
+      dayEl.appendChild(grid);
+      cal.appendChild(dayEl);
+    });
+  }
+
+  // Modal logic
+  const dialog = document.getElementById('signupDialog');
+  const form = document.getElementById('signupForm');
+  const nameInput = document.getElementById('name');
+  const daySelect = document.getElementById('daySelect');
+  const shiftSelect = document.getElementById('shiftSelect');
+  document.getElementById('cancelBtn').addEventListener('click', ()=>dialog.close());
+
+  function populateDayAndShift(defaults){
+    // Days dropdown
+    daySelect.innerHTML='';
+    DAYS.forEach(d=>{
+      const opt=document.createElement('option');
+      opt.value=isoDate(d);
+      opt.textContent = `${weekdayName(d)} • ${humanDate(d)}`;
+      daySelect.appendChild(opt);
+    });
+    // Default selected day
+    if(defaults?.dateISO){ daySelect.value = defaults.dateISO; }
+    // Shifts dropdown based on selected day
+    refreshShiftOptions();
+    if(defaults?.shift){ shiftSelect.value = defaults.shift; }
+  }
+
+  function refreshShiftOptions(){
+    const chosenISO = daySelect.value;
+    const date = new Date(chosenISO);
+    const weekdayIdx = (date.getDay()||7);
+    const opts = shiftsFor(weekdayIdx);
+    shiftSelect.innerHTML='';
+    opts.forEach(s=>{
+      const o=document.createElement('option');
+      o.value=s; o.textContent=s; shiftSelect.appendChild(o);
+    });
+  }
+  daySelect?.addEventListener('change', refreshShiftOptions);
+
+  function openSignup(defaults){
+    populateDayAndShift(defaults);
+    if(defaults?.label && defaults?.shift){
+      dialog.querySelector('h3').textContent = `Sign up: ${defaults.label} — ${defaults.shift}`;
+    } else {
+      dialog.querySelector('h3').textContent = 'Sign up for a shift';
+    }
+    nameInput.value='';
+    dialog.showModal();
+  }
+
+  form.addEventListener('submit', (e)=>{
+    e.preventDefault();
+    const name = nameInput.value.trim();
+    const dateISO = daySelect.value;
+    const shift = shiftSelect.value;
+    if(!name){ alert('Please enter your name'); return; }
+    saveName(dateISO, shift, name);
+    dialog.close();
+    render();
+    // Update URL to clear any signup hash
+    if(location.hash){ history.replaceState(null,'',location.pathname); }
+  });
+
+  // Sanitize helper for name list
+  function escapeHtml(str){
+    return str.replace(/[&<>"']/g, (c)=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  }
+
+  // QR code: link to same page with #signup so phones open the form
+  const qrCanvas = document.getElementById('qrcode');
+  const signupLink = (location.origin+location.pathname+'#signup');
+  QRCode.toCanvas(qrCanvas, signupLink, {width: 130});
+
+  // If user visits with #signup, open the form with defaults
+  function maybeOpenFromHash(){
+    if(location.hash === '#signup'){
+      openSignup();
+    }
+  }
+
+  // Initial render
+  render();
+  maybeOpenFromHash();
+</script>
+</body>
+</html>

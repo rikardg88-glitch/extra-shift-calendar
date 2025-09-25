@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Shift Signup</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f7f7fb; margin:20px; }
+    .wrap { max-width:400px; margin:auto; background:#fff; padding:20px; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,0.1); }
+    h1 { font-size:20px; margin-bottom:16px; }
+    label { display:block; margin:12px 0 4px; font-weight:600; }
+    input, select { width:100%; padding:10px; border-radius:6px; border:1px solid #ccc; }
+    button { margin-top:16px; padding:10px 14px; border:none; border-radius:8px; background:#4caf50; color:white; font-weight:700; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Sign up for a shift</h1>
+    <form>
+      <label for="name">Your name</label>
+      <input id="name" required />
+
+      <label for="day">Day</label>
+      <select id="day"></select>
+
+      <label for="shift">Shift</label>
+      <select id="shift"></select>
+
+      <button type="submit">Sign Up</button>
+    </form>
+  </div>
+
+  <script>
+    // Generate next 7 days in dropdown
+    function next7Days() {
+      const days=[]; const today=new Date(); today.setHours(0,0,0,0);
+      for(let i=0;i<7;i++){ const d=new Date(today); d.setDate(today.getDate()+i); days.push(d); }
+      return days;
+    }
+    const daySel=document.getElementById('day');
+    next7Days().forEach(d=>{
+      const opt=document.createElement('option');
+      opt.value=d.toISOString().slice(0,10);
+      opt.textContent=d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+      daySel.appendChild(opt);
+    });
+
+    // Default shifts (could be smarter like index.html)
+    const shiftSel=document.getElementById('shift');
+    ['Day','Afternoon','Night'].forEach(s=>{
+      const opt=document.createElement('option');
+      opt.value=s; opt.textContent=s;
+      shiftSel.appendChild(opt);
+    });
+
+    // Handle form submission (local only, extend to Google Sheets later)
+    document.querySelector('form').addEventListener('submit', e=>{
+      e.preventDefault();
+      alert(`Signed up: ${document.getElementById('name').value} on ${daySel.value} for ${shiftSel.value} shift`);
+    });
+  </script>
+</body>
+</html>
